@@ -1,0 +1,4 @@
+# Real Xiaomi BT gamepad (2717:3144): hide its input + hidraw nodes from users.
+# The root xiaomi-gamepad daemon reads it and exposes a clean virtual Xbox 360 pad.
+SUBSYSTEM=="input", ATTRS{id/vendor}=="2717", ATTRS{id/product}=="3144", TAG-="uaccess", OWNER="root", GROUP="root", MODE="0600"
+KERNEL=="hidraw*", KERNELS=="0005:2717:3144.*", OWNER="root", GROUP="root", MODE="0600"

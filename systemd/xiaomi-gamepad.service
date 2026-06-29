@@ -1,0 +1,11 @@
+[Unit]
+Description=Xiaomi Mi Bluetooth Gamepad -> virtual Xbox 360 pad (mapping + rumble)
+After=bluetooth.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/xiaomi-gamepad.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
