@@ -10,4 +10,6 @@ rm -fv /etc/systemd/system/xiaomi-gamepad.service \
        /etc/modules-load.d/uinput.conf
 systemctl daemon-reload
 udevadm control --reload
+# /etc/xiaomi-gamepad/gyro-games.conf is deliberately preserved (your game list).
 echo "Uninstalled. (The pad's real input nodes are no longer hidden.)"
+echo "Your gyro-games.conf was kept; run 'sudo rm -r /etc/xiaomi-gamepad' to remove it too."

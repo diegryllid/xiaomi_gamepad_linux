@@ -1,0 +1,14 @@
+# xiaomi-gamepad: per-game gyro / tilt-aim.
+#
+# List the games that should get accelerometer tilt-aim -- ONE process-name substring per line.
+# While a process whose command line contains one of these substrings is running, pad tilt drives
+# the right stick. Games NOT listed here (e.g. GTA) never get gyro, and the pad is never written to
+# on their behalf. Blank lines and lines starting with '#' are ignored. The list is re-read live,
+# so edits take effect within a couple of seconds -- no daemon restart needed.
+#
+# Find a running game's process name with, e.g.:   pgrep -fa <name>
+# For Wine/Proton games it's usually the .exe name (e.g. "Game.exe").
+#
+# Examples -- DELETE these and add your own games:
+# SuperTuxKart
+# Game.exe

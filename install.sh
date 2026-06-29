@@ -16,6 +16,11 @@ install -Dm755 "$HERE/xiaomi-gamepad.py"               /usr/local/bin/xiaomi-gam
 install -Dm644 "$HERE/udev/99-xiaomi-gamepad-hide.rules" /etc/udev/rules.d/99-xiaomi-gamepad-hide.rules
 install -Dm644 "$HERE/systemd/xiaomi-gamepad.service"  /etc/systemd/system/xiaomi-gamepad.service
 
+# per-game gyro config -- keep the user's existing game list if one is already there
+install -d /etc/xiaomi-gamepad
+[ -f /etc/xiaomi-gamepad/gyro-games.conf ] || \
+  install -Dm644 "$HERE/gyro-games.conf.example" /etc/xiaomi-gamepad/gyro-games.conf
+
 echo uinput > /etc/modules-load.d/uinput.conf
 modprobe uinput || true
 udevadm control --reload

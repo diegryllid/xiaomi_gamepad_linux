@@ -83,6 +83,22 @@ Each of those makes the pad **disconnect on rumble**. The pad firmware has a kno
 rumble write can briefly wedge it; **ERTM's reliable L2CAP retransmission is exactly what lets the
 link ride that out**. The default stack is the robust one — leave it alone.
 
+## Gyro / tilt-aim (per-game)
+
+The pad has a 3-axis **accelerometer** (tilt, not a true gyroscope). The driver can map tilt onto
+the right stick — but **only for games you explicitly opt in**, so it never touches the rest:
+
+1. List the games in `/etc/xiaomi-gamepad/gyro-games.conf` — one **process-name substring** per
+   line (`#` for comments). For a Wine/Proton game that's usually the `.exe` name.
+2. While a listed game is running, tilt drives the right stick; when it exits, tilt switches off.
+   No restart needed — the list is re-read live.
+
+Games **not** listed never get the accelerometer enabled (zero writes to the pad on their behalf),
+so titles like GTA are completely unaffected. The accel is enabled over the **interrupt channel**
+(the same safe path as rumble), never the control-channel write that destabilises this pad. Tuning
+knobs live at the top of `xiaomi-gamepad.py`: `TILT_SCALE` (sensitivity), `TILT_DEADZONE`,
+`TILT_SMOOTH`, and `TILT_X_SIGN` / `TILT_Y_SIGN` (axis inversion).
+
 ## Tools
 
 | tool | what it does |
@@ -110,6 +126,9 @@ journalctl -u xiaomi-gamepad -e
 ```sh
 sudo ./uninstall.sh
 ```
+
+Your `/etc/xiaomi-gamepad/gyro-games.conf` (your game list) is left in place; run
+`sudo rm -r /etc/xiaomi-gamepad` to remove it too.
 
 ## Credits
 
