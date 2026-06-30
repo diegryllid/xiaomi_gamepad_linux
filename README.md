@@ -91,6 +91,19 @@ supervision timeout** the pad **disconnects and powers itself off**. Two things 
 > the control channel (`HIDIOCSFEATURE`/`SET_REPORT`) — it wedges this pad. (`tools/wedge-trigger-test.py`
 > and `tools/keepalive-buzz-test.py` are the probes used to establish all of this.)
 
+## Tested on
+
+- **Pad:** Xiaomi Mi Bluetooth Gamepad, `2717:3144`. The behaviour the rumble fix relies on — input
+  reported **on-change**, the brief **post-rumble input gap**, and **`[0x20,0,0]` powering the pad
+  off** — are firmware properties of *this* pad, so they hold on any host.
+- **Host Bluetooth:** Intel **AX200** (USB `8087:0029`, firmware `ibt-20-1-3` v193-33.24), **BlueZ
+  5.86**, kernel **7.1.x** (Arch / CachyOS).
+
+The **idle keep-alive** targets the *pad's* quirk and should help regardless of host. But the ~20 s
+**link-supervision timeout** and the "keep the stock stack, don't disable ERTM" guidance are
+properties of the **host** Bluetooth adapter + BlueZ — on a different BT chipset the exact timing and
+sensitivity can differ (the underlying principle — never let the link go silent — still applies).
+
 ## Gyro / tilt-aim (per-game)
 
 The pad has a 3-axis **accelerometer** (tilt, not a true gyroscope). The driver can map tilt onto
