@@ -69,19 +69,27 @@ python3 tools/xiaomi-verify.py     # press each button; it prints the Xbox contr
 | Right stick | right stick | byte7 / byte8 |
 | Mi / Logo | Guide | byte20 `0x01` |
 
-## ⚠️ Rumble — important Bluetooth note
+## ⚠️ Rumble — how the drops were actually fixed
 
-Rumble works on the **stock / default** BlueZ + kernel Bluetooth stack. **Do not "optimize" the BT
-stack for this pad.** Specifically, do **not**:
+This pad has a firmware quirk: **a rumble write briefly makes it stop sending input**, and it reports
+input **on-change** (not as a steady stream). With a naive driver that only writes rumble on-change,
+the host *also* goes quiet once a rumble ends → the BT link sits silent → after the ~20 s **link
+supervision timeout** the pad **disconnects and powers itself off**. Two things fix it, both required:
 
-- disable L2CAP **ERTM** (`disable_ertm=1`)
-- disable **sniff** mode / `IdleTimeout=0`
-- force the kernel **`hidp`** path (`UserspaceHID=false`)
-- disable **USB autosuspend** on the BT controller
+1. **A daemon idle keep-alive (the real fix).** While the motor is idle the rumble pump re-sends the
+   SAFE stop packet every `KEEPALIVE_S` (2 s) — a *silent* write that keeps the link warm and pokes
+   the pad to resume input, so the post-rumble gap never grows into a supervision-timeout drop. It is
+   **idle-only** (re-sending during active rumble would re-buzz the motor) and is deferred past attach.
+2. **The stock BlueZ + kernel Bluetooth stack.** Do **not** "optimize" it: don't disable L2CAP
+   **ERTM** (`disable_ertm=1`), **sniff** (`IdleTimeout=0`), force kernel **`hidp`**
+   (`UserspaceHID=false`), or disable **USB autosuspend**. Each makes the brief wedge a *hard*
+   disconnect — ERTM's reliable L2CAP retransmission is what lets the link ride the quirk out.
 
-Each of those makes the pad **disconnect on rumble**. The pad firmware has a known quirk where a
-rumble write can briefly wedge it; **ERTM's reliable L2CAP retransmission is exactly what lets the
-link ride that out**. The default stack is the robust one — leave it alone.
+> **Packet safety (hardware-verified):** rumble/stop are `[0x20][weak][strong]` OUTPUT reports on the
+> **interrupt** channel (`os.write`), strong motor capped at `0xC0`. The stop is `[0x20,0x01,0x01]`.
+> **`[0x20,0x00,0x00]` is never sent — it POWERS THE PAD OFF** (hard-guarded in the daemon). Never use
+> the control channel (`HIDIOCSFEATURE`/`SET_REPORT`) — it wedges this pad. (`tools/wedge-trigger-test.py`
+> and `tools/keepalive-buzz-test.py` are the probes used to establish all of this.)
 
 ## Gyro / tilt-aim (per-game)
 

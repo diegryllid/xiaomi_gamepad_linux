@@ -25,15 +25,20 @@ from evdev import UInput, ecodes as e, AbsInfo
 VID, PID = 0x2717, 0x3144
 STRONG_CAP = 0xC0          # big motor above this can power the pad off
 REPORT_ID = 0x04           # gamepad input report id
-RUMBLE_STOP = bytes([0x20, 0x01, 0x01])   # 0x00,0x00 does NOT fully stop the motors
+RUMBLE_STOP = bytes([0x20, 0x01, 0x01])   # SAFE stop / silent keep-alive. NOTE: [0x20,0,0] is NOT a
+                                          # stop -- it POWERS THE PAD OFF (verified). Never send it.
+TOXIC_ZERO = bytes([0x20, 0x00, 0x00])    # forbidden packet -- hard-guarded in Rumble._send below
 RUMBLE_ENABLED = True      # master switch for rumble output to the pad
 RUMBLE_POLL_S = 0.03       # min seconds between rumble writes -- a SINGLE rate-limited writer
                            # (mirrors the reference driver) so FF bursts never flood the BT link
-# This pad's firmware can briefly WEDGE on a rumble write (stop sending input) -- a quirk that hits
-# Windows too. The pad streams input at ~20ms, so a long gap right after a rumble means it wedged;
-# we just LOG it (BlueZ's link supervision timeout then drops + auto-reconnects the pad on its own).
-# NOTE: keep the STOCK Bluetooth stack -- disabling ERTM/sniff/hidp turns this brief wedge into a
-# hard disconnect.
+KEEPALIVE_S = 2.0          # idle keep-alive: while the motor is OFF, re-send the SAFE stop this often
+                           # so the BT link never sits silent into the ~20s supervision-timeout drop.
+                           # This pad briefly stops sending INPUT right after a rumble; with no host
+                           # traffic the link then goes quiet and the pad disconnects (and powers off).
+                           # The keep-alive both holds the link up AND pokes the pad to resume input.
+# Wedge watchdog (LOG-ONLY): this pad reports input ON-CHANGE (not a steady stream), so a gap after a
+# rumble is the firmware briefly going quiet. The KEEPALIVE above is the actual fix; this just logs.
+# NOTE: keep the STOCK Bluetooth stack -- disabling ERTM/sniff/hidp makes the wedge a hard disconnect.
 WEDGE_S = 1.5              # log a wedge if no input arrives this long after a recent rumble
 RECENT_RUMBLE_S = 3.0      # only treat an input gap as a wedge if rumble fired within this window
 FF_DEBUG = False           # set True for verbose FF + battery logging to the journal
@@ -234,10 +239,12 @@ def emit_report(ui, r, tilt=None):
     ui.syn()
 
 # ---- rumble: forward FF effects to the pad ----
-# The firmware rumbles until the NEXT packet. A SINGLE rate-limited writer thread owns every
-# rumble write: it polls the desired motor state and writes ONLY on change, at most every
-# RUMBLE_POLL_S. This mirrors the reference driver and keeps writes sparse, so a game's rapid
-# FF on/off bursts can never flood / destabilise the Bluetooth link. Both motors are capped.
+# The firmware rumbles until the NEXT packet. A SINGLE rate-limited writer thread owns every rumble
+# write: it polls the desired motor state and writes on change, at most every RUMBLE_POLL_S, so a
+# game's rapid FF on/off bursts never flood the link. Both motors are capped. When the motor is IDLE
+# it additionally re-sends the SAFE stop every KEEPALIVE_S -- a silent keep-alive that holds the BT
+# link up through the brief post-rumble input gap (otherwise: silence -> supervision-timeout drop).
+# It NEVER heartbeats during active rumble (that re-buzzes) and NEVER sends [0x20,0,0] (powers off).
 # (Set RUMBLE_ENABLED=False to suppress all motor writes while keeping the rest of the daemon.)
 class Rumble:
     def __init__(self, hidraw_fd, write_lock):
@@ -281,26 +288,41 @@ class Rumble:
         # the same path xpadneo / DS4 / SDL use. Do NOT use HIDIOCSFEATURE / SET_REPORT (the control
         # channel): it round-trips a blocking device handshake that stalls this pad under load. The
         # descriptor declares report 0x20 Feature-only, but the firmware still actuates on this write.
+        if pkt == TOXIC_ZERO:          # hard safety: [0x20,0,0] powers this pad OFF -- never emit it
+            return
         with self.write_lock:          # single writer: never overlap the accel-enable packet
             os.write(self.fd, pkt)
     def _pump(self):
-        # write ONLY on change (no heartbeat -- this pad buzzes on every output write, so a
-        # periodic re-send produces continuous rumble). The supervision-timeout-on-freeze issue
-        # is handled elsewhere, not by re-sending rumble.
+        # Write on change; PLUS a silent idle keep-alive. The active rumble itself keeps the link
+        # warm, so we re-send nothing while the motor is on (re-sending re-buzzes). But the moment
+        # rumble ends this pad can briefly stop sending input -- if the host also goes quiet the link
+        # sits silent into a ~20s supervision-timeout drop. So while IDLE we re-send the SAFE stop
+        # (RUMBLE_STOP, silent + verified harmless) every KEEPALIVE_S to hold the link and poke the
+        # pad back. The toxic [0x20,0,0] is never produced here and is hard-guarded in _send.
+        # seed to NOW so the first idle keep-alive waits a full KEEPALIVE_S -- never write on attach
+        # (the pad is already streaming input then; a stop-write on attach re-creates the documented
+        # connect -> wedge -> disconnect -> reconnect loop the self.written=(0,0) guard exists to stop)
+        last_write = time.monotonic()
         while self.running:
             with self.lock:
                 tgt = self.target
-            if tgt != self.written:
-                self.written = tgt
-                if tgt != (0, 0):
-                    self.last_rumble_t = time.monotonic()   # for the wedge watchdog
+            changed = (tgt != self.written)
+            now = time.monotonic()
+            keepalive = (RUMBLE_ENABLED and not changed and tgt == (0, 0)
+                         and (now - last_write) >= KEEPALIVE_S)
+            if changed or keepalive:
+                if changed:
+                    self.written = tgt
+                    if tgt != (0, 0):
+                        self.last_rumble_t = now            # for the wedge watchdog
                 if RUMBLE_ENABLED:
                     pkt = RUMBLE_STOP if tgt == (0, 0) else bytes([0x20, tgt[0], tgt[1]])
                     try:
                         self._send(pkt)
+                        last_write = now
                     except OSError as ex:
                         if FF_DEBUG: log("rumble write failed:", ex)
-                if FF_DEBUG: log("ff: motor ->", tgt)
+                if FF_DEBUG and changed: log("ff: motor ->", tgt)
             time.sleep(RUMBLE_POLL_S)
     def close(self):
         # stop the pump BEFORE the fd closes (never write to a closed/reused fd), motor off
@@ -367,10 +389,10 @@ def run_once():
         while True:
             rlist, _, _ = select.select([fd], [], [], WEDGE_S)
             if not rlist:
-                # the pad streams input at ~20ms; a long gap right after a rumble = firmware WEDGE
-                # (a hardware quirk that hits Windows too). We do NOT force-disconnect -- that powers
-                # the pad OFF (it won't auto-reconnect). Just log it; the BT supervision timeout will
-                # drop + auto-reconnect the pad on its own. The real fix is preventing the wedge.
+                # this pad reports input ON-CHANGE, so a gap after a rumble is the firmware briefly
+                # going quiet (a hardware quirk that hits Windows too). We do NOT force-disconnect --
+                # that powers the pad OFF. Just LOG it; the Rumble idle keep-alive (every KEEPALIVE_S)
+                # is what actually holds the link up and pokes the pad to resume input.
                 if rumble and rumble.recent_rumble() and not wedged:
                     log("pad WEDGED (no input %.1fs after a rumble) -- waiting for BT auto-recover"
                         % WEDGE_S)
