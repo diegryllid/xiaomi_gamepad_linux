@@ -1,11 +1,12 @@
 [Unit]
 Description=Xiaomi Mi Bluetooth Gamepad -> virtual Xbox 360 pad (mapping + rumble)
 After=bluetooth.target
+# Started/stopped ON DEMAND by udev when the pad connects/disconnects (see
+# 99-xiaomi-gamepad-hide.rules) -- deliberately NOT enabled at boot, so it uses no RAM while the
+# pad is off. There is no [Install] section for that reason. Restart=always only covers a crash
+# while the pad is still connected; udev's explicit stop on disconnect is respected (not restarted).
 
 [Service]
 ExecStart=/usr/bin/python3 /usr/local/bin/xiaomi-gamepad.py
 Restart=always
 RestartSec=3
-
-[Install]
-WantedBy=multi-user.target

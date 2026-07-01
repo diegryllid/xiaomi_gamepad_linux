@@ -1,4 +1,11 @@
-# Real Xiaomi BT gamepad (2717:3144): hide its input + hidraw nodes from users.
-# The root xiaomi-gamepad daemon reads it and exposes a clean virtual Xbox 360 pad.
+# Real Xiaomi BT gamepad (2717:3144): (a) hide its input + hidraw nodes from users so games only ever
+# see the clean virtual Xbox 360 pad, and (b) run the xiaomi-gamepad daemon ONLY while the pad is
+# connected -- it uses zero RAM when the pad is off.
 SUBSYSTEM=="input", ATTRS{id/vendor}=="2717", ATTRS{id/product}=="3144", TAG-="uaccess", OWNER="root", GROUP="root", MODE="0600"
 KERNEL=="hidraw*", KERNELS=="0005:2717:3144.*", OWNER="root", GROUP="root", MODE="0600"
+
+# On-demand lifecycle. Start the daemon when the pad's hidraw appears; stop it when the pad goes away.
+# The ENV tag set on `add` is stored in the udev database, so the `remove` event -- which carries no
+# ATTRS/KERNELS to match on -- can still be recognised as this pad.
+ACTION=="add",    SUBSYSTEM=="hidraw", KERNELS=="0005:2717:3144.*", ENV{XIAOMI_GAMEPAD}="1", RUN+="/usr/bin/systemctl --no-block start xiaomi-gamepad.service"
+ACTION=="remove", SUBSYSTEM=="hidraw", ENV{XIAOMI_GAMEPAD}=="1", RUN+="/usr/bin/systemctl --no-block stop xiaomi-gamepad.service"

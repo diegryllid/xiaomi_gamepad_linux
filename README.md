@@ -136,11 +136,17 @@ knobs live at the top of `xiaomi-gamepad.py`: `TILT_SCALE` (sensitivity), `TILT_
 
 ## Service control
 
+The daemon is **on-demand**: a udev rule starts it the moment the pad connects and stops it when the
+pad powers off, so it uses **no RAM while the pad is off** (it is *not* enabled at boot). Turn the
+pad on and it's up within ~1 s; turn it off and the service goes away.
+
 ```sh
-systemctl status xiaomi-gamepad
-sudo systemctl restart xiaomi-gamepad
+systemctl status xiaomi-gamepad          # active only while the pad is connected
 journalctl -u xiaomi-gamepad -e
 ```
+
+Want it always-on instead (e.g. to shave that ~1 s startup)? Add `[Install] WantedBy=multi-user.target`
+to the unit and `sudo systemctl enable --now xiaomi-gamepad`.
 
 ## Uninstall
 

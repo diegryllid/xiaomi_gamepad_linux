@@ -25,8 +25,15 @@ echo uinput > /etc/modules-load.d/uinput.conf
 modprobe uinput || true
 udevadm control --reload
 systemctl daemon-reload
-systemctl enable --now xiaomi-gamepad.service
+
+# On-demand: udev starts the daemon when the pad connects and stops it when the pad disconnects, so
+# it uses no RAM while the pad is off. NOT enabled at boot. (Undo any old boot-enable, clear a stale
+# instance, then let udev start it now iff the pad is already connected.)
+systemctl disable xiaomi-gamepad.service 2>/dev/null || true
+systemctl stop    xiaomi-gamepad.service 2>/dev/null || true
+udevadm trigger --subsystem-match=hidraw --action=add
 
 echo
-echo "Installed. Turn the gamepad on -- it appears as 'Microsoft X-Box 360 pad'."
+echo "Installed (on-demand: the daemon runs only while the pad is connected)."
+echo "Turn the gamepad on -- it appears as 'Microsoft X-Box 360 pad'."
 echo "Verify mapping:  python3 $HERE/tools/xiaomi-verify.py"
